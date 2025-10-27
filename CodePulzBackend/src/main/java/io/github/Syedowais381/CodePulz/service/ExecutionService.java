@@ -1,11 +1,7 @@
 package io.github.Syedowais381.CodePulz.service;
-
-
-
 import io.github.Syedowais381.CodePulz.dto.ExecutionRequest;
 import io.github.Syedowais381.CodePulz.dto.ExecutionResponse;
 import org.springframework.stereotype.Service;
-
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -21,8 +17,8 @@ import java.util.concurrent.TimeUnit;
 
 @Service
 public class ExecutionService {
-
- private static final long EXECUTION_TIMEOUT_SECONDS = 15;
+    
+ private static final long EXECUTION_TIMEOUT_SECONDS = 60;
  private static final long OUTPUT_READ_TIMEOUT_SECONDS = 5;
 
  public ExecutionResponse executeCode(ExecutionRequest request) {
@@ -91,6 +87,8 @@ public class ExecutionService {
              return "index.js";
          case "cpp":
              return "main.cpp";
+         case "c": // <<< ADD THIS CASE
+             return "main.c";
          case "csharp":
              return "Program.cs";
          case "go":
@@ -103,19 +101,20 @@ public class ExecutionService {
  /**
   * Builds the complete, sandboxed docker command for a given language.
   */
+ /**
+  * Builds the complete, sandboxed docker command for a given language.
+  */
  private String[] buildDockerCommand(String language, Path tempDir, String filename) {
      String mountPath = tempDir.toAbsolutePath().toString();
 
-     // Base command with all security and sandbox flags
      List<String> command = new ArrayList<>(Arrays.asList(
-             "docker", "run", "--rm",         // Run and automatically remove
-             "--cpus=0.5",                   // Limit to 50% of one CPU
-             "--memory=256m",                // Limit to 256MB of RAM
-             "--workdir", "/app",            // Set working directory inside container
-             "-v", mountPath + ":/app"       // Mount temp folder to /app in container
+             "docker", "run", "--rm",
+             "--cpus=0.5",
+             "--memory=256m",
+             "--workdir", "/app",
+             "-v", mountPath + ":/app"
      ));
 
-     // Add language-specific image and run command
      switch (language.toLowerCase()) {
          case "java":
              command.add("openjdk:17-slim");
@@ -133,19 +132,22 @@ public class ExecutionService {
              command.add("gcc:latest");
              command.addAll(Arrays.asList("sh", "-c", "g++ " + filename + " -o myapp && ./myapp"));
              break;
+         case "c": // <<< ADD THIS CASE
+             command.add("gcc:latest");
+             command.addAll(Arrays.asList("sh", "-c", "gcc " + filename + " -o myapp && ./myapp"));
+             break;
          case "csharp":
-             // This command creates a new console app, copies the user's code over, and runs it.
-             // It's a robust way to run a single C# file without a pre-built project.
+             // *** FIXED COMMAND ***
+             // Create project files, then run. The user's Program.cs is already mounted.
              command.add("mcr.microsoft.com/dotnet/sdk:7.0");
              command.addAll(Arrays.asList("sh", "-c",
-                     "dotnet new console --force > /dev/null && cp /app/" + filename + " . && dotnet run"));
+                     "dotnet new console --force > /dev/null && dotnet run"));
              break;
          case "go":
              command.add("golang:1.20");
              command.addAll(Arrays.asList("go", "run", filename));
              break;
          default:
-             // This should be caught by getFilenameForLanguage, but we double-check.
              throw new IllegalArgumentException("Unsupported language: " + language);
      }
 
