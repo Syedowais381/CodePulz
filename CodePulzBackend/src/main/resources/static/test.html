@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CodePulz WebSocket Test</title>
+    <style>
+        #output {
+            width: 100%;
+            height: 300px;
+            border: 1px solid #ccc;
+            overflow-y: auto;
+            font-family: monospace;
+            padding: 10px;
+            background: #f5f5f5;
+        }
+        #input {
+            width: 100%;
+            padding: 10px;
+            margin-top: 10px;
+        }
+        .status {
+            color: blue;
+        }
+        .error {
+            color: red;
+        }
+        .stdout {
+            color: black;
+        }
+        .stderr {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    <h2>CodePulz WebSocket Test</h2>
+    
+    <div>
+        <h3>Step 1: Create Execution Session</h3>
+        <textarea id="code" rows="5" style="width: 100%">public class Main {
+    public static void main(String[] args) {
+        System.out.println("Hello! Enter a number:");
+        java.util.Scanner sc = new java.util.Scanner(System.in);
+        int n = sc.nextInt();
+        System.out.println("You entered: " + n);
+    }
+}</textarea>
+        <button onclick="createSession()">Create Session</button>
+    </div>
+
+    <div>
+        <h3>Step 2: Connect WebSocket</h3>
+        <button onclick="connectWebSocket()" id="connectBtn">Connect WebSocket</button>
+        <button onclick="disconnectWebSocket()" id="disconnectBtn" disabled>Disconnect</button>
+    </div>
+
+    <div>
+        <h3>Step 3: Program Output & Input</h3>
+        <div id="output"></div>
+        <div style="margin-top: 10px;">
+            <input type="text" id="input" placeholder="Type input here and press Enter" disabled>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let sessionId = null;
+        let inputEnabled = false;
+
+        function appendToOutput(type, text) {
+            const output = document.getElementById('output');
+            const div = document.createElement('div');
+            div.className = type;
+            div.textContent = text;
+            output.appendChild(div);
+            output.scrollTop = output.scrollHeight;
+        }
+
+        async function createSession() {
+            try {
+                const response = await fetch('http://localhost:8080/api/v1/execute/start', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        code: document.getElementById('code').value,
+                        language: 'java'
+                    })
+                });
+                const data = await response.json();
+                sessionId = data.sessionId;
+                appendToOutput('status', 'Session created: ' + sessionId);
+                document.getElementById('connectBtn').disabled = false;
+            } catch (error) {
+                appendToOutput('error', 'Error creating session: ' + error);
+            }
+        }
+
+        function connectWebSocket() {
+            if (!sessionId) {
+                appendToOutput('error', 'Create a session first!');
+                return;
+            }
+
+            ws = new WebSocket(`ws://localhost:8080/ws/execute/${sessionId}`);
+            
+            ws.onopen = () => {
+                appendToOutput('status', 'WebSocket connected');
+                document.getElementById('connectBtn').disabled = true;
+                document.getElementById('disconnectBtn').disabled = false;
+                document.getElementById('input').disabled = false;
+            };
+
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                
+                switch (message.type) {
+                    case 'stdout':
+                        appendToOutput('stdout', message.data);
+                        break;
+                    case 'stderr':
+                        appendToOutput('stderr', message.data);
+                        break;
+                    case 'status':
+                        inputEnabled = message.waitingForInput;
+                        document.getElementById('input').disabled = !inputEnabled;
+                        if (inputEnabled) {
+                            document.getElementById('input').focus();
+                        }
+                        break;
+                    case 'exit':
+                        appendToOutput('status', `Program exited with code ${message.code}`);
+                        break;
+                    case 'error':
+                        appendToOutput('error', message.message);
+                        break;
+                }
+            };
+
+            ws.onclose = () => {
+                appendToOutput('status', 'WebSocket disconnected');
+                document.getElementById('connectBtn').disabled = false;
+                document.getElementById('disconnectBtn').disabled = true;
+                document.getElementById('input').disabled = true;
+                ws = null;
+            };
+
+            ws.onerror = (error) => {
+                appendToOutput('error', 'WebSocket error: ' + error);
+            };
+        }
+
+        function disconnectWebSocket() {
+            if (ws) {
+                ws.close();
+            }
+        }
+
+        document.getElementById('input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey && ws && inputEnabled) {
+                const input = this.value + '\n';
+                ws.send(JSON.stringify({
+                    type: 'stdin',
+                    data: input,
+                    raw: false
+                }));
+                appendToOutput('status', '> ' + this.value);
+                this.value = '';
+            }
+        });
+    </script>
+</body>
+</html>
